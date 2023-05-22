@@ -43,7 +43,7 @@ func New() actor.Actor {
 		memory:  buffer.Memories{Items: make([]buffer.Memory, 0)},
 		state:   models.Init,
 		// to prevent infinite loop
-		maxAttempts: 2, // todo add as a config
+		maxAttempts: 5, // todo add as a config
 	}
 }
 
@@ -63,12 +63,6 @@ func (agent *Terminal) Receive(ac actor.Context) {
 		agent.state = models.Thinking
 		if msg.RequestID != uuid.Nil {
 			agent.id = msg.RequestID
-		}
-		if agent.maxAttempts <= 0 {
-			t := time.Now()
-			l.Error().Msg("maxAttempts exceeded for terminal agent")
-			agent.reportErrorToParent(ac, models.Error{ErrMessage: "maxAttempts exceeded for terminal agent", Message: msg, Time: &t})
-			return
 		}
 
 		err := agent.handler.CreateDirectoryIfNotExists(agent.id.String())
@@ -100,6 +94,13 @@ func (agent *Terminal) Receive(ac actor.Context) {
 		// it currently will attempt to brute force rather than intelligently diagnose
 		l.Debug().Msgf("DiagnoseCommand received: %v", msg)
 		agent.state = models.Thinking
+		if agent.maxAttempts <= 0 {
+			t := time.Now()
+			l.Error().Msg("maxAttempts exceeded for terminal agent")
+			agent.reportErrorToParent(ac, models.Error{ErrMessage: "maxAttempts exceeded for terminal agent", Message: msg, Time: &t})
+			return
+		}
+		agent.maxAttempts--
 
 		l.Info().Msg("diagnosing problem from previous command...")
 		previousAttempts := agent.marshalPreviousAttempts(msg.PreviousAttempts)
@@ -139,7 +140,6 @@ func (agent *Terminal) Receive(ac actor.Context) {
 				Reason:  diagnose.Reason,
 			})
 			ac.Send(ac.Self(), messages.DiagnoseCommand{PreviousAttempts: previous, Task: msg.Task})
-			agent.maxAttempts--
 			return
 		}
 

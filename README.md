@@ -11,6 +11,7 @@ Instead of copying the implementation, I've used this project a proof of concept
   - Long-term memory will be very useful for not repeating the same observed problems
   - Agents with custom or specialized LLMs will be useful
   - How well you construct a chain can help solve a task better by providing more context to solving the problem
+  - DAG's to dynamically construct chains will be useful
   - It can get expensive quickly, even for simple tasks
 
 ## Some Existing Features
