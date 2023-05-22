@@ -26,7 +26,7 @@ func (h *Handler) Plan(ctx context.Context, newAction messages.NewGoal) models.H
 		return models.HandlerResult{Error: fmt.Errorf("call: %w", err)}
 	}
 
-	question, err := template.Parse(prompts.PlannerNewAction, newAction)
+	question, err := template.Parse(prompts.PlanTemplate, newAction)
 	if err != nil {
 		return models.HandlerResult{Error: fmt.Errorf("execute: %w", err)}
 	}

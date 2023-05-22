@@ -31,7 +31,7 @@ type Terminal struct {
 }
 
 var (
-	TerminalDiagnoseErrorPrompt = langChainPrompts.NewPromptTemplate(prompts.TerminalDiagnoseError, []string{"PreviousAttempts", "Task"})
+	TerminalDiagnoseErrorPrompt = langChainPrompts.NewPromptTemplate(prompts.CommandDiagnoseTemplate, []string{"PreviousAttempts", "Task"})
 )
 
 func New() actor.Actor {
@@ -43,7 +43,7 @@ func New() actor.Actor {
 		memory:  buffer.Memories{Items: make([]buffer.Memory, 0)},
 		state:   models.Init,
 		// to prevent infinite loop
-		maxAttempts: 10, // todo add as a config
+		maxAttempts: 2, // todo add as a config
 	}
 }
 
@@ -58,15 +58,23 @@ func (agent *Terminal) Receive(ac actor.Context) {
 		l.Debug().Msg("stopped actor and its children")
 	case *actor.Restarting:
 		l.Debug().Msg("restarting actor")
-	case messages.NewTerminal:
-		l.Debug().Msgf("NewTerminal received: %v", msg)
+	case messages.ExecuteCommand:
+		l.Debug().Msgf("ExecuteCommand received: %v", msg)
 		agent.state = models.Thinking
-		agent.id = msg.RequestID
+		if msg.RequestID != uuid.Nil {
+			agent.id = msg.RequestID
+		}
+		if agent.maxAttempts <= 0 {
+			t := time.Now()
+			l.Error().Msg("maxAttempts exceeded for terminal agent")
+			agent.reportErrorToParent(ac, models.Error{ErrMessage: "maxAttempts exceeded for terminal agent", Message: msg, Time: &t})
+			return
+		}
 
 		err := agent.handler.CreateDirectoryIfNotExists(agent.id.String())
 		if err != nil {
 			t := time.Now()
-			agent.reportErrorToParent(ac, models.Error{Err: err, Message: msg, Time: &t})
+			agent.reportErrorToParent(ac, models.Error{ErrMessage: err.Error(), Message: msg, Time: &t})
 			return
 		}
 
@@ -75,34 +83,30 @@ func (agent *Terminal) Receive(ac actor.Context) {
 		if err != nil {
 			agent.state = models.Failed
 			l.Error().Err(err).Msgf("command failed: %v", msg.Command)
-			ac.Send(ac.Self(), messages.HandleTerminalError{PreviousAttempts: []messages.TerminalError{{
+			previous := append(msg.PreviousAttempts, messages.CommandAttempt{
 				Command: msg.Command,
 				Error:   err.Error(),
 				Reason:  msg.Reason,
-			}}, Task: msg.Task})
+			})
+			ac.Send(ac.Self(), messages.DiagnoseCommand{PreviousAttempts: previous, Task: msg.Task})
 			return
 		}
 
-		ac.Send(ac.Parent(), messages.TerminalResult{Result: out})
+		l.Info().Msgf("command succeeded with output: %v", out)
+		ac.Send(ac.Parent(), messages.CommandResult{Result: out, DiagnosticAttempts: msg.PreviousAttempts})
 		ac.Stop(ac.Self())
-	case messages.HandleTerminalError:
+	case messages.DiagnoseCommand:
 		// todo this should honestly use sub-prompts to determine what is available to help determine the next step
 		// it currently will attempt to brute force rather than intelligently diagnose
-		l.Debug().Msgf("HandleTerminalError received: %v", msg)
+		l.Debug().Msgf("DiagnoseCommand received: %v", msg)
 		agent.state = models.Thinking
-		if agent.maxAttempts <= 0 {
-			t := time.Now()
-			l.Error().Msg("maxAttempts exceeded for terminal agent")
-			agent.reportErrorToParent(ac, models.Error{Err: errors.New("maxAttempts exceeded for terminal agent"), Message: msg, Time: &t})
-			return
-		}
 
 		l.Info().Msg("diagnosing problem from previous command...")
 		previousAttempts := agent.marshalPreviousAttempts(msg.PreviousAttempts)
 		hRes := agent.handler.DiagnoseNextAttempt(context.Background(), msg.Task, previousAttempts)
 		if hRes.Error != nil {
 			t := time.Now()
-			agent.reportErrorToParent(ac, models.Error{Err: hRes.Error, Message: msg, Time: &t})
+			agent.reportErrorToParent(ac, models.Error{ErrMessage: hRes.Error.Error(), Message: msg, Time: &t})
 			return
 		}
 		agent.memory.Add(buffer.Memory{
@@ -113,14 +117,14 @@ func (agent *Terminal) Receive(ac actor.Context) {
 		match, err := data.SanitizeAnswer(hRes.Answer)
 		if err != nil {
 			t := time.Now()
-			agent.reportErrorToParent(ac, models.Error{Err: err, Message: msg, Time: &t})
+			agent.reportErrorToParent(ac, models.Error{ErrMessage: err.Error(), Message: msg, Time: &t})
 			return
 		}
 
 		diagnose, err := parseDiagnose(match)
 		if err != nil {
 			t := time.Now()
-			agent.reportErrorToParent(ac, models.Error{Err: err, Message: msg, Time: &t})
+			agent.reportErrorToParent(ac, models.Error{ErrMessage: err.Error(), Message: msg, Time: &t})
 			return
 		}
 
@@ -129,32 +133,38 @@ func (agent *Terminal) Receive(ac actor.Context) {
 		if err != nil {
 			agent.state = models.Failed
 			l.Error().Err(err).Msgf("command failed again: %v", diagnose.Command)
-			previous := append(msg.PreviousAttempts, messages.TerminalError{
+			previous := append(msg.PreviousAttempts, messages.CommandAttempt{
 				Command: diagnose.Command,
 				Error:   err.Error(),
 				Reason:  diagnose.Reason,
 			})
-			ac.Send(ac.Self(), messages.HandleTerminalError{PreviousAttempts: previous, Task: msg.Task})
+			ac.Send(ac.Self(), messages.DiagnoseCommand{PreviousAttempts: previous, Task: msg.Task})
 			agent.maxAttempts--
 			return
 		}
 
-		ac.Send(ac.Parent(), messages.TerminalResult{Result: out})
-		ac.Stop(ac.Self())
+		previous := append(msg.PreviousAttempts, messages.CommandAttempt{
+			Command: diagnose.Command,
+			Reason:  diagnose.Reason,
+			Output:  out,
+		})
+
+		l.Info().Msg("command succeeded, I should try the original command now...")
+		ac.Send(ac.Self(), messages.ExecuteCommand{Command: msg.PreviousAttempts[0].Command, Task: msg.Task, Reason: msg.PreviousAttempts[0].Reason, PreviousAttempts: previous})
 	default:
 		l.Warn().Str(logger.RequestTaskID, agent.id.String()).Msgf("unknown message: %v", msg)
 	}
 	agent.state = models.Idle
 }
 
-func (agent *Terminal) marshalPreviousAttempts(previousAttempts []messages.TerminalError) string {
+func (agent *Terminal) marshalPreviousAttempts(previousAttempts []messages.CommandAttempt) string {
 	res, _ := json.Marshal(previousAttempts) // todo err
 	return string(res)
 }
 
 func (agent *Terminal) reportErrorToParent(ac actor.Context, err models.Error) {
 	agent.state = models.Failed
-	log.Error().Err(err.Err).Msg("reporting error to parent...")
+	log.Error().Err(errors.New(err.ErrMessage)).Msg("reporting error to parent...")
 	ac.Send(ac.Parent(), messages.ReportError{Error: err})
 	ac.Stop(ac.Self())
 }

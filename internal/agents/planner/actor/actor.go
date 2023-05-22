@@ -32,7 +32,7 @@ type Planner struct {
 }
 
 var (
-	NewActionPrompt = langChainPrompt.NewPromptTemplate(prompts.PlannerNewAction, []string{"Goal"})
+	NewActionPrompt = langChainPrompt.NewPromptTemplate(prompts.PlanTemplate, []string{"Goal"})
 )
 
 func New() actor.Actor {
@@ -84,7 +84,7 @@ func (agent *Planner) Receive(ac actor.Context) {
 			// todo need to store the state in the api before stopping the actor
 		}
 		ac.Respond(models.Status{
-			Planner: models.Agent{
+			Planner: models.Planner{
 				State:       agent.state,
 				Plan:        ans,
 				TaskHistory: agent.history,
@@ -101,7 +101,7 @@ func (agent *Planner) Receive(ac actor.Context) {
 		hRes := agent.handler.Plan(context.Background(), msg) // todo timeout
 		if hRes.Error != nil {
 			t := time.Now()
-			agent.err = models.Error{Err: hRes.Error, Message: msg, Time: &t}
+			agent.err = models.Error{ErrMessage: hRes.Error.Error(), Message: msg, Time: &t}
 			agent.state = models.Failed
 			return
 		}
@@ -113,7 +113,7 @@ func (agent *Planner) Receive(ac actor.Context) {
 		match, err := data.SanitizeAnswer(hRes.Answer)
 		if err != nil {
 			t := time.Now()
-			agent.err = models.Error{Err: err, Message: msg, Time: &t}
+			agent.err = models.Error{ErrMessage: err.Error(), Message: msg, Time: &t}
 			agent.state = models.Failed
 			return
 		}
@@ -121,7 +121,7 @@ func (agent *Planner) Receive(ac actor.Context) {
 		tasks, err := parseAnswer(match)
 		if err != nil {
 			t := time.Now()
-			agent.err = models.Error{Err: hRes.Error, Message: msg, Time: &t}
+			agent.err = models.Error{ErrMessage: hRes.Error.Error(), Message: msg, Time: &t}
 			agent.state = models.Failed
 			l.Error().Err(err).Str(logger.RequestTaskID, agent.id.String()).Msg("unable to parse answer from plan")
 			return

@@ -32,7 +32,7 @@ func (h *Handler) Solution(ctx context.Context, task, goal, history string) mode
 	}
 
 	input := input{Goal: goal, Task: task, History: history}
-	question, err := template.Parse(prompts.AgentTaskTemplate, input)
+	question, err := template.Parse(prompts.TaskTemplate, input)
 	if err != nil {
 		return models.HandlerResult{Error: fmt.Errorf("execute: %w", err)}
 	}

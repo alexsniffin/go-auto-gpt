@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-type Agent struct {
+type Planner struct {
 	State       State               `json:"state"`
 	TaskHistory []TaskHistory       `json:"history"`
 	Plan        map[string][]string `json:"plan"`
@@ -12,13 +12,13 @@ type Agent struct {
 }
 
 type Status struct {
-	Planner Agent `json:"planner"`
+	Planner Planner `json:"planner"`
 }
 
 type Error struct {
-	Err     error       `json:"error,omitempty"`
-	Message interface{} `json:"message,omitempty"`
-	Time    *time.Time  `json:"time,omitempty"`
+	ErrMessage string      `json:"error,omitempty"`
+	Message    interface{} `json:"message,omitempty"`
+	Time       *time.Time  `json:"time,omitempty"`
 }
 
 type Solution struct {
@@ -30,9 +30,9 @@ type Solution struct {
 }
 
 type TaskHistory struct {
-	Task     string      `json:"task"`
-	Solution Solution    `json:"solution"`
-	Result   interface{} `json:"result"`
+	Task     string   `json:"task"`
+	Solution Solution `json:"solution"`
+	Result   any      `json:"result"`
 }
 
 type Plan struct {

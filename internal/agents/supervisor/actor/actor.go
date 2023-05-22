@@ -35,7 +35,7 @@ type Supervisor struct {
 }
 
 var (
-	TaskPrompt = langChainPrompts.NewPromptTemplate(prompts.AgentTaskTemplate, []string{"Goal", "Task", "History"})
+	TaskPrompt = langChainPrompts.NewPromptTemplate(prompts.TaskTemplate, []string{"Goal", "Task", "History"})
 )
 
 func New() actor.Actor {
@@ -69,7 +69,6 @@ func (agent *Supervisor) Receive(ac actor.Context) {
 		agent.goal = msg.Goal
 		agent.id = msg.RequestID
 		agent.tasksQueue = append(agent.tasksQueue, msg.Tasks...)
-		l.Info().Str(logger.RequestTaskID, agent.id.String()).Msgf("thinking about a solution for the next task...")
 		agent.Next(ac, msg)
 	case messages.SearchResult: // from search actor
 		l.Debug().Str(logger.RequestTaskID, agent.id.String()).Msgf("SearchResult received from search agent: %v", msg)
@@ -78,9 +77,9 @@ func (agent *Supervisor) Receive(ac actor.Context) {
 			return
 		}
 		agent.Next(ac, msg)
-	case messages.TerminalResult:
-		l.Debug().Str(logger.RequestTaskID, agent.id.String()).Msgf("TerminalResult received from terminal agent: %v", msg)
-		agent.history[len(agent.history)-1].Result = msg.Result
+	case messages.CommandResult:
+		l.Debug().Str(logger.RequestTaskID, agent.id.String()).Msgf("CommandResult received from terminal agent: %v", msg)
+		agent.history[len(agent.history)-1].Result = msg
 		if finish := agent.reportTaskToParent(ac, agent.history[len(agent.history)-1]); finish {
 			return
 		}
@@ -102,11 +101,11 @@ func (agent *Supervisor) Next(ac actor.Context, msg interface{}) {
 	agent.tasksQueue = agent.tasksQueue[1:] // pop
 
 	l.Info().Str(logger.TaskField, task).Msg("grabbing next task off the queue...")
-	l.Info().Str(logger.TaskField, task).Msg("determining solution for task...")
+	l.Info().Str(logger.TaskField, task).Msg("thinking about a solution for the task...")
 	hRes := agent.handler.Solution(context.Background(), task, agent.goal, agent.marshalHistory())
 	if hRes.Error != nil {
 		t := time.Now()
-		agent.reportErrorToParent(ac, models.Error{Err: hRes.Error, Time: &t, Message: msg})
+		agent.reportErrorToParent(ac, models.Error{ErrMessage: hRes.Error.Error(), Time: &t, Message: msg})
 		return
 	}
 	agent.memory.Add(buffer.Memory{
@@ -117,14 +116,14 @@ func (agent *Supervisor) Next(ac actor.Context, msg interface{}) {
 	match, err := data.SanitizeAnswer(hRes.Answer)
 	if err != nil {
 		t := time.Now()
-		agent.reportErrorToParent(ac, models.Error{Err: err, Message: msg, Time: &t})
+		agent.reportErrorToParent(ac, models.Error{ErrMessage: err.Error(), Message: msg, Time: &t})
 		return
 	}
 
 	ans, err := parseAnswer(match)
 	if err != nil {
 		t := time.Now()
-		agent.reportErrorToParent(ac, models.Error{Err: err, Time: &t, Message: msg})
+		agent.reportErrorToParent(ac, models.Error{ErrMessage: err.Error(), Time: &t, Message: msg})
 		return
 	}
 
@@ -139,13 +138,13 @@ func (agent *Supervisor) Next(ac actor.Context, msg interface{}) {
 	case tools.Terminal:
 		props := actor.PropsFromProducer(terminalActor.New)
 		child := ac.Spawn(props)
-		ac.Send(child, messages.NewTerminal{RequestID: agent.id, Command: ans.Inputs[0], Reason: ans.Reasoning, Task: task}) // todo dont assume one input
+		ac.Send(child, messages.ExecuteCommand{RequestID: agent.id, Command: ans.Inputs[0], Reason: ans.Reasoning, Task: task}) // todo dont assume one input
 		agent.history = append(agent.history, models.TaskHistory{Task: task, Solution: ans})
 		return
 	default:
 		l.Error().Msgf("unknown tool: %v", ans.Tool)
 		t := time.Now()
-		agent.reportErrorToParent(ac, models.Error{Err: errors.New("unknown tool when determining solution from task"), Message: msg, Time: &t})
+		agent.reportErrorToParent(ac, models.Error{ErrMessage: "unknown tool when determining solution from task", Message: msg, Time: &t})
 		return
 	}
 }
@@ -158,9 +157,10 @@ func (agent *Supervisor) marshalHistory() string {
 func (agent *Supervisor) reportTaskToParent(ac actor.Context, task models.TaskHistory) bool {
 	log.Info().Msg("reporting completed task to parent...")
 	if len(agent.tasksQueue) == 0 {
+		log.Info().Msg("we have completed all the tasks in our queue, report the results back to the user!")
 		agent.state = models.Finished
 		ac.Send(ac.Parent(), messages.TaskResult{TaskHistory: task})
-		ac.Send(ac.Parent(), messages.SupervisorComplete{})
+		ac.Send(ac.Parent(), messages.SupervisorComplete{Result: task.Result})
 		ac.Stop(ac.Self())
 		return true
 	} else {
@@ -171,7 +171,7 @@ func (agent *Supervisor) reportTaskToParent(ac actor.Context, task models.TaskHi
 
 func (agent *Supervisor) reportErrorToParent(ac actor.Context, err models.Error) {
 	agent.state = models.Failed
-	log.Error().Err(err.Err).Msg("reporting error to parent...")
+	log.Error().Err(errors.New(err.ErrMessage)).Msg("reporting error to parent...")
 	ac.Send(ac.Parent(), messages.ReportError{Error: err})
 	ac.Stop(ac.Self())
 }

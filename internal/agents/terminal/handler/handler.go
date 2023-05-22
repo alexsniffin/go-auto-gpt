@@ -41,7 +41,7 @@ func (h *Handler) DiagnoseNextAttempt(ctx context.Context, task, previousAttempt
 		return models.HandlerResult{Error: fmt.Errorf("call: %w", err)}
 	}
 
-	question, err := template.Parse(prompts.TerminalDiagnoseError, input{
+	question, err := template.Parse(prompts.CommandDiagnoseTemplate, input{
 		Task:             task,
 		PreviousAttempts: previousAttempts,
 	})
@@ -53,6 +53,7 @@ func (h *Handler) DiagnoseNextAttempt(ctx context.Context, task, previousAttempt
 }
 
 func executeCommand(command, id string) (string, error) {
+	// Create the command with redirected standard input
 	cmd := exec.Command("bash", "-c", "cd sandbox/"+id+" && "+command)
 
 	output, err := cmd.CombinedOutput()
