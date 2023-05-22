@@ -35,7 +35,7 @@ Instead of copying the implementation, I've used this project a proof of concept
 - Lacking proper chains and memory
 - No persistent memory
 - No embeddings
-- Only setup to run text-davinci-003 (this can be switched in the code)
+- Only setup to run text-davinci-003 with default settings (this can be switched in the code)
 - Only one tool (it will get confused if you ask something it can't do, e.g. I asked it to search for trends in AI and it tried to search the filesystem)
 - Terminal agent will sometimes try to brute force its way to a solution
   - because of this, it has a hardcoded maxAttempts for diagnosing problems
@@ -75,4 +75,6 @@ Nice to haves if I continue this project.
 - [ ] add persistent memory
 - [ ] remote actors
 - [ ] add search tool
+- [ ] update it so the supervisor doesn't determine how to do the task, let the agent with the tool do it
+- [ ] fix terminal agent memory
 - [ ] clean up the quickly written code
