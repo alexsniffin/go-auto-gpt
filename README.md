@@ -5,7 +5,7 @@
 Instead of copying the implementation, I've used this project a proof of concept to quickly try to both learn and bring a new design to how to solve autonomous tasks. Specifically the orchestration of agents.
 
 ## What I Learned
-  - It will become increasingly more important to have increased context window size from models to build more complex autonomous agents with lots of text
+  - It will become increasingly more important to have increased context window size from models to build more complex autonomous agents with lots of tokens
   - The need for DSLs for creating optimized prompts to limit tokens will be useful (see: [We need new DSLs for the era of LLMs](https://zainhoda.github.io/2023/05/20/dsls-for-llms.html))
   - The orchestration of agents is important and ability to communicate in a cluster might let agents delegate work when they need something
   - Long-term memory will be very useful for not repeating the same observed problems
@@ -45,10 +45,11 @@ Instead of copying the implementation, I've used this project a proof of concept
 You will need to set `OPENAI_API_KEY` to your [key](https://platform.openai.com/account/api-keys).
 
 ### Warning :exclamation:
-The agents have the ability to execute arbitrary code on your machine! It is recommended to use the [sandbox.Dockerfile](sandbox.Dockerfile).
+The agents have the ability to execute arbitrary code on your machine! It is recommended to use the [sandbox.Dockerfile](sandbox.Dockerfile). You might need to modify it to pass the binary in as I had tested it from an IDE.
 
 If you want to view any output, you'll want to mount a volume to the container `-v ./sandbox:/app/sandbox`.
 
+#### API
 To create a new goal to be solved by the agents, simply make a request to the API:
 ```bash
 curl --location --request POST 'localhost:8080/new' \
